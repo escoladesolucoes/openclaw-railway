@@ -172,7 +172,7 @@ instagramRoutes.post('/instagram/handoff', async (req, res) => {
 instagramRoutes.post('/instagram', (req, res) => {
   const signature = req.get('x-hub-signature-256');
   const sigOk = verifySignature(req.rawBody, signature);
-  recordActivity({ stage: 'post', object: req.body?.object, sigOk, hasSig: Boolean(signature), hasRawBody: Boolean(req.rawBody) });
+  recordActivity({ stage: 'post', object: req.body?.object, sigOk, hasSig: Boolean(signature), hasRawBody: Boolean(req.rawBody), body: req.body });
   if (!sigOk) {
     log.warn('[instagram] rejected event — invalid/missing signature');
     return res.sendStatus(401);
@@ -195,12 +195,21 @@ async function handleWebhook(body) {
   }
 
   for (const entry of body.entry || []) {
-    const events = entry.messaging || entry.standby || [];
-    recordActivity({ stage: 'entry', entryKeys: Object.keys(entry), eventsCount: events.length });
+    // Two payload shapes Meta uses for Instagram messaging:
+    //   A) Messenger-style: entry.messaging[] = [{ sender, message }]
+    //   B) Instagram Graph (Instagram Login flow): entry.changes[] =
+    //      [{ field: 'messages', value: { sender, recipient, message } }]
+    const messagingEvents = entry.messaging || entry.standby || [];
+    const changeEvents = (entry.changes || [])
+      .filter((c) => c && c.field === 'messages' && c.value)
+      .map((c) => c.value);
+    const events = [...messagingEvents, ...changeEvents];
+    recordActivity({ stage: 'entry', entryKeys: Object.keys(entry), messagingCount: messagingEvents.length, changesCount: changeEvents.length });
+
     for (const ev of events) {
       const senderId = ev.sender?.id;
       const message = ev.message;
-      recordActivity({ stage: 'event', senderId, hasMessage: Boolean(message), isEcho: Boolean(message?.is_echo), evKeys: Object.keys(ev), text: (message?.text || '').slice(0, 80) });
+      recordActivity({ stage: 'event', senderId, hasMessage: Boolean(message), isEcho: Boolean(message?.is_echo), text: (message?.text || '').slice(0, 80) });
       if (!senderId || !message) continue;
       if (message.is_echo) continue;          // ignore our own outbound echoes (prevents loops)
       const text = (message.text || '').trim();
