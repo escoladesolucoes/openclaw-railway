@@ -40,22 +40,29 @@ export async function runAgentTurn(text, sessionKey, { agent = IG_AGENT } = {}) 
 }
 
 /**
- * The CLI prints a JSON object shaped like:
- *   { payloads: [{ text, mediaUrl }], meta: {...}, deliveryStatus: {...} }
- * but stdout/stderr may carry log noise, so we extract the JSON defensively:
- * parse the whole blob first, then fall back to the widest {...} slice.
+ * OpenClaw 2026.5.x prints (with --json):
+ *   { status: "ok", result: { payloads: [{ text, mediaUrl }], meta: {...} } }
+ * so the reply lives at result.payloads[].text. We also accept a top-level
+ * `payloads` (older docs) and fall back to meta.finalAssistantVisibleText.
+ * stdout/stderr may carry log noise, so safeParseJson extracts defensively.
  */
 function extractReplyText(output) {
   const obj = safeParseJson(output);
-  if (obj && Array.isArray(obj.payloads)) {
-    const txt = obj.payloads
+  if (!obj) return null;
+
+  const payloads = obj.result?.payloads ?? obj.payloads;
+  if (Array.isArray(payloads)) {
+    const txt = payloads
       .map((p) => (p && typeof p.text === 'string' ? p.text : ''))
       .filter(Boolean)
       .join('\n')
       .trim();
-    return txt || null;
+    if (txt) return txt;
   }
-  return null;
+
+  const fallback = obj.result?.meta?.finalAssistantVisibleText
+    ?? obj.result?.meta?.finalAssistantRawText;
+  return (typeof fallback === 'string' && fallback.trim()) ? fallback.trim() : null;
 }
 
 function safeParseJson(output) {
