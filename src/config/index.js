@@ -49,6 +49,13 @@ export const IG_ACCESS_TOKEN  = process.env.IG_ACCESS_TOKEN  || null; // Instagr
 export const IG_AGENT         = process.env.IG_AGENT         || null; // optional: route to a specific openclaw agent id
 export const IG_GRAPH_HOST    = process.env.IG_GRAPH_HOST    || 'graph.instagram.com';
 export const IG_GRAPH_VERSION = process.env.IG_GRAPH_VERSION || 'v21.0';
+// Optional: POST a JSON alert here when a user requests a human (/humano).
+// Point it at a Slack/Discord/Telegram incoming webhook, or your own endpoint.
+export const IG_HANDOFF_WEBHOOK = process.env.IG_HANDOFF_WEBHOOK || null;
+// Default bot behaviour per Instagram conversation:
+//   'off' (default) → bot stays silent until the user sends /bot (human-first)
+//   'on'            → bot answers until the user sends /humano
+export const IG_DEFAULT_BOT = process.env.IG_DEFAULT_BOT || 'off';
 
 // Path to openclaw's entry.js — invoking via `node entry.js` is more reliable
 // than the bin wrapper (avoids env-detection quirks in containers and lets us

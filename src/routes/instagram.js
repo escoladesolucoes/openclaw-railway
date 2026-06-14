@@ -15,17 +15,26 @@
 
 import { Router } from 'express';
 import {
-  IG_VERIFY_TOKEN, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_AGENT, IG_GRAPH_VERSION,
+  IG_VERIFY_TOKEN, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_AGENT, IG_GRAPH_VERSION, IG_DEFAULT_BOT,
 } from '../config/index.js';
 import {
-  verifySignature, parseSignedRequest, sendInstagramMessage, instagramBridgeConfigured,
+  verifySignature, parseSignedRequest, sendInstagramMessage, notifyHandoff, instagramBridgeConfigured,
 } from '../services/instagram.js';
 import { runAgentTurn } from '../services/agentRunner.js';
+import { isBotEnabled, enableBot, disableBot, listBotStates } from '../services/instagramHandoff.js';
 import { runOpenclaw } from '../services/onboardBuilder.js';
 import { gatewayManager } from '../services/gatewayManager.js';
 import { log } from '../utils/log.js';
 
 export const instagramRoutes = Router();
+
+// ── Human ⇄ bot handoff keyword commands (whole-message, case-insensitive) ──
+// Default is human-first (IG_DEFAULT_BOT=off): the bot only answers a user
+// after they send /bot, and goes quiet again on /humano. Edit freely.
+const ENABLE_COMMANDS = new Set(['/bot', '/ia', '/assistente']);
+const DISABLE_COMMANDS = new Set(['/humano', '/atendente', 'falar com humano', 'falar com atendente']);
+const BOT_ON_MSG = '🤖 Assistente ativado! Pode mandar sua pergunta. (pra falar com um humano, é só mandar /humano)';
+const BOT_OFF_MSG = '👋 Ok! Um atendente humano vai te responder por aqui. (pra reativar o assistente automático, mande /bot)';
 
 // ── GET /webhooks/instagram — Meta verification handshake ──────────
 // Meta calls this once when you save the webhook: it sends hub.mode=subscribe,
@@ -134,6 +143,24 @@ instagramRoutes.get('/instagram/debug-agent', async (req, res) => {
   }
 });
 
+// ── Handoff status + manual control (gated by IG_VERIFY_TOKEN) ──────
+// GET  → see the default + per-user overrides
+// POST { action: "enable"|"disable", user: "<igsid>" } → flip a user
+instagramRoutes.get('/instagram/handoff', async (req, res) => {
+  if (!IG_VERIFY_TOKEN || req.query.token !== IG_VERIFY_TOKEN) return res.sendStatus(403);
+  res.json({ defaultBot: IG_DEFAULT_BOT, overrides: await listBotStates() });
+});
+
+instagramRoutes.post('/instagram/handoff', async (req, res) => {
+  if (!IG_VERIFY_TOKEN || req.query.token !== IG_VERIFY_TOKEN) return res.sendStatus(403);
+  const { action, user } = req.body || {};
+  if (!user || !['enable', 'disable'].includes(action)) {
+    return res.status(400).json({ error: 'body needs { action: "enable"|"disable", user: "<igsid>" }' });
+  }
+  if (action === 'enable') await enableBot(user); else await disableBot(user);
+  res.json({ ok: true, action, user, overrides: await listBotStates() });
+});
+
 // ── POST /webhooks/instagram — inbound events ──────────────────────
 instagramRoutes.post('/instagram', (req, res) => {
   const signature = req.get('x-hub-signature-256');
@@ -169,6 +196,28 @@ async function handleWebhook(body) {
 }
 
 async function replyTo(senderId, text) {
+  const cmd = text.trim().toLowerCase();
+
+  // ── Handoff commands (work even if the gateway is down) ──
+  if (ENABLE_COMMANDS.has(cmd)) {
+    await enableBot(senderId);
+    log.info(`[instagram] 🤖 ${senderId} ativou o assistente`);
+    return trySend(senderId, BOT_ON_MSG);
+  }
+  if (DISABLE_COMMANDS.has(cmd)) {
+    await disableBot(senderId);
+    await notifyHandoff({ event: 'human_requested', user: senderId, ts: new Date().toISOString() });
+    log.info(`[instagram] 🙋 ${senderId} pediu atendente humano`);
+    return trySend(senderId, BOT_OFF_MSG);
+  }
+
+  // ── Default human-first: only answer if this user enabled the bot ──
+  if (!(await isBotEnabled(senderId))) {
+    log.info(`[instagram] ${senderId}: bot desligado — em silêncio (humano atende)`);
+    return;
+  }
+
+  // ── Bot is on for this user → normal agent flow ──
   if (!gatewayManager.isRunning()) {
     log.warn(`[instagram] gateway not running — dropping message from ${senderId}`);
     return;
@@ -188,11 +237,14 @@ async function replyTo(senderId, text) {
     log.warn(`[instagram] no reply text for ${senderId} — nothing sent`);
     return;
   }
+  await trySend(senderId, reply);
+}
 
+async function trySend(senderId, text) {
   try {
-    await sendInstagramMessage(senderId, reply);
-    log.info(`[instagram] ▶ ${senderId}: ${reply.slice(0, 120)}`);
+    await sendInstagramMessage(senderId, text);
+    log.info(`[instagram] ▶ ${senderId}: ${text.slice(0, 120)}`);
   } catch (err) {
-    log.error(`[instagram] failed to send reply to ${senderId}: ${err.message}`);
+    log.error(`[instagram] failed to send to ${senderId}: ${err.message}`);
   }
 }

@@ -13,8 +13,9 @@
 
 import crypto from 'crypto';
 import {
-  IG_APP_SECRET, IG_ACCESS_TOKEN, IG_GRAPH_HOST, IG_GRAPH_VERSION,
+  IG_APP_SECRET, IG_ACCESS_TOKEN, IG_GRAPH_HOST, IG_GRAPH_VERSION, IG_HANDOFF_WEBHOOK,
 } from '../config/index.js';
+import { log } from '../utils/log.js';
 
 /**
  * Validate Meta's webhook signature. Returns true only if the HMAC-SHA256 of
@@ -84,4 +85,21 @@ export async function sendInstagramMessage(recipientId, text) {
 /** True when the minimum env needed to receive + reply is present. */
 export function instagramBridgeConfigured() {
   return Boolean(IG_APP_SECRET && IG_ACCESS_TOKEN);
+}
+
+/**
+ * Best-effort alert when a user requests a human (/humano). POSTs the payload
+ * to IG_HANDOFF_WEBHOOK if configured; always a no-op-safe (never throws).
+ */
+export async function notifyHandoff(payload) {
+  if (!IG_HANDOFF_WEBHOOK) return;
+  try {
+    await fetch(IG_HANDOFF_WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    log.warn(`[instagram] handoff webhook failed: ${err.message}`);
+  }
 }
