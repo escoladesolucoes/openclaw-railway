@@ -7,9 +7,9 @@
  * ask the agent for a reply via the `openclaw agent` CLI (which routes through
  * the running gateway), then deliver the reply ourselves.
  *
- *   openclaw agent --message "<text>" --session-key "<key>" --json
+ *   openclaw agent --message "<text>" --session-id "<id>" --json
  *
- * The stable --session-key keeps per-user conversation memory across calls.
+ * The stable --session-id keeps per-user conversation memory across calls.
  * We do NOT pass --deliver: the agent only computes the reply; the caller
  * delivers it back over the originating channel's own API.
  */
@@ -27,7 +27,7 @@ const AGENT_TIMEOUT_MS = 180_000;
  * @returns {Promise<{reply: string|null, code: number, raw: string}>}
  */
 export async function runAgentTurn(text, sessionKey, { agent = IG_AGENT } = {}) {
-  const args = ['agent', '--message', text, '--session-key', sessionKey, '--json'];
+  const args = ['agent', '--message', text, '--session-id', sessionKey, '--json'];
   if (agent) args.push('--agent', agent);
 
   const result = await runOpenclaw(args, AGENT_TIMEOUT_MS);
