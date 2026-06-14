@@ -9,7 +9,7 @@
  *  - buildOnboardArgs(data)   — returns the CLI args array for onboard
  *  - runOpenclaw(args)        — spawns `openclaw <args>` and returns { code, output }
  *  - runConfigSet(key, value) — shorthand for `openclaw config set key value`
- *  - runConfigSetJson(key, v) — shorthand for `openclaw config set --json key <json>`
+ *  - runConfigSetJson(key, v) — shorthand for `openclaw config set --strict-json key <json>`
  *  - runModelsSet(model)      — shorthand for `openclaw models set <model>`
  */
 
@@ -33,7 +33,17 @@ import { log } from '../utils/log.js';
 
 const OAUTH_AUTH_CHOICE = {
   // provider:authMode → openclaw --auth-choice value
-  'openai:oauth': 'openai-codex-device-code',
+  //
+  // Only *device-code* OAuth flows are listed here — they print a short URL +
+  // code to stdout and poll, which is the only OAuth style that works on a
+  // headless Railway container (no localhost browser callback needed). Redirect
+  // /PKCE flows (e.g. openrouter-oauth, qwen-oauth) require a localhost:3000
+  // callback the user's browser can't reach, so they are intentionally omitted.
+  //
+  // NOTE: 'openai-codex-device-code' was renamed to 'openai-device-code' in
+  // OpenClaw 2026.6.x. Using the old value breaks OpenAI OAuth onboarding.
+  'openai:oauth': 'openai-device-code',
+  'xai:oauth':    'xai-device-code',
 };
 
 export function isOauthRequest(data) {
@@ -65,6 +75,11 @@ const PROVIDER_MAP = {
   aigateway:   { authChoice: 'ai-gateway-api-key',   keyFlag: '--ai-gateway-api-key' },
   synthetic:   { authChoice: 'synthetic-api-key',    keyFlag: '--synthetic-api-key' },
   cloudflare:  { authChoice: 'cloudflare-ai-gateway-api-key', keyFlag: '--cloudflare-ai-gateway-api-key' },
+  // Added in 2026.6.x — verified to write a valid auth profile via onboard.
+  fireworks:   { authChoice: 'fireworks-api-key',    keyFlag: '--fireworks-api-key' },
+  deepinfra:   { authChoice: 'deepinfra-api-key',    keyFlag: '--deepinfra-api-key' },
+  novita:      { authChoice: 'novita-api-key',       keyFlag: '--novita-api-key' },
+  gmi:         { authChoice: 'gmi-api-key',          keyFlag: '--gmi-api-key' },
 
   // ── Specialized / Other ──────────────────────────────────────────
   groq: {
@@ -78,12 +93,26 @@ const PROVIDER_MAP = {
   chutes:      { authChoice: 'chutes-api-key',       keyFlag: '--chutes-api-key' },
   kilocode:    { authChoice: 'kilocode-api-key',     keyFlag: '--kilocode-api-key' },
   opencode:    { authChoice: 'opencode-zen',         keyFlag: '--opencode-zen-api-key' },
+  // Added in 2026.6.x — verified to write a valid auth profile via onboard.
+  cerebras:    { authChoice: 'cerebras-api-key',     keyFlag: '--cerebras-api-key' },
+  nvidia:      { authChoice: 'nvidia-api-key',       keyFlag: '--nvidia-api-key' },
+  arcee:       { authChoice: 'arceeai-api-key',      keyFlag: '--arceeai-api-key' },
+  // Ollama Cloud is the hosted Ollama service — needs an API key, NOT a base
+  // URL (unlike self-hosted `ollama`), so it behaves like a normal key provider.
+  ollamacloud: { authChoice: 'ollama-cloud',         keyFlag: '--ollama-cloud-api-key' },
 
   // ── Asia / Regional ──────────────────────────────────────────────
   moonshot:    { authChoice: 'moonshot-api-key',     keyFlag: '--moonshot-api-key' },
   zai:         { authChoice: 'zai-api-key',          keyFlag: '--zai-api-key' },
   minimax:     { authChoice: 'minimax-global-api',   keyFlag: '--minimax-api-key' },
-  modelstudio: { authChoice: 'modelstudio-api-key',  keyFlag: '--modelstudio-api-key' },
+  // ModelStudio = Alibaba's Qwen Cloud (DashScope). The provider/auth-choice is
+  // `qwen-api-key` (Coding Plan, Global/Intl); the key is passed via the
+  // `--modelstudio-api-key` flag. The old `modelstudio-api-key` auth-choice was
+  // never valid (crashed onboard on both 2026.5.x and 2026.6.x).
+  modelstudio: { authChoice: 'qwen-api-key',         keyFlag: '--modelstudio-api-key' },
+  // Kimi Coding Plan subscription (Moonshot) — distinct from `moonshot` PAYG.
+  kimi:        { authChoice: 'kimi-code-api-key',    keyFlag: '--kimi-code-api-key' },
+  tokenhub:    { authChoice: 'tokenhub-api-key',     keyFlag: '--tokenhub-api-key' },
   volcengine:  { authChoice: 'volcengine-api-key',   keyFlag: '--volcengine-api-key' },
   qianfan:     { authChoice: 'qianfan-api-key',      keyFlag: '--qianfan-api-key' },
   xiaomi:      { authChoice: 'xiaomi-api-key',       keyFlag: '--xiaomi-api-key' },
@@ -107,6 +136,13 @@ export function buildOnboardArgs(data) {
     '--accept-risk',
     '--no-install-daemon',
     '--skip-health',
+    // Skip the interactive "Enable hooks?" prompt entirely. Without this the
+    // OAuth PTY flow has to pattern-match and auto-answer it (see autoInputs in
+    // setup.js), which is fragile if the prompt wording changes. (2026.6.x)
+    '--skip-hooks',
+    // Keep the gateway token out of onboard's stdout — it would otherwise be
+    // echoed into the OAuth output we stream live to the browser. (2026.6.x)
+    '--suppress-gateway-token-output',
     '--workspace', workspaceDir,
     '--gateway-bind', 'loopback',
     '--gateway-port', String(GATEWAY_PORT),
@@ -334,11 +370,13 @@ export async function runConfigSet(key, value) {
 }
 
 export async function runConfigSetJson(key, value) {
+  // `--strict-json` is the canonical flag in 2026.6.x; `--json` is now only a
+  // deprecated legacy alias for it and may be removed in a future release.
   const result = await runOpenclaw([
-    'config', 'set', '--json', key, JSON.stringify(value),
+    'config', 'set', '--strict-json', key, JSON.stringify(value),
   ]);
   if (result.code !== 0) {
-    log.warn(`config set --json ${key} failed (exit=${result.code}): ${result.output}`);
+    log.warn(`config set --strict-json ${key} failed (exit=${result.code}): ${result.output}`);
   }
   return result;
 }
