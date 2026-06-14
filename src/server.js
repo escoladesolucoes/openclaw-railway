@@ -23,6 +23,7 @@ import { attachTerminalWebSocket, terminalWss } from './services/terminalService
 import { setupRoutes } from './routes/setup.js';
 import { apiRoutes } from './routes/api.js';
 import { instagramRoutes } from './routes/instagram.js';
+import { legalRoutes } from './routes/legal.js';
 import { proxyMiddleware } from './middleware/proxy.js';
 import { requestLogger } from './middleware/logger.js';
 import { requireAdminAuth, setAuthCookie, clearAuthCookie } from './middleware/auth.js';
@@ -77,6 +78,9 @@ async function main() {
   // Meta webhook bridge (Instagram Direct) — must be before the catch-all
   // proxy so /webhooks/* is handled by us, not forwarded to the gateway.
   app.use('/webhooks', instagramRoutes);
+
+  // Public legal pages (privacy policy at /privacy) — before the catch-all proxy.
+  app.use('/', legalRoutes);
 
   /**
    * SSE: real-time pairing pending updates

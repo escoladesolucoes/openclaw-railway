@@ -57,6 +57,11 @@ export const IG_HANDOFF_WEBHOOK = process.env.IG_HANDOFF_WEBHOOK || null;
 //   'on'            → bot answers until the user sends /humano
 export const IG_DEFAULT_BOT = process.env.IG_DEFAULT_BOT || 'off';
 
+// Privacy Policy page (/privacy) — Meta requires a public privacy policy URL to
+// publish the app. Customize without code via these Railway env vars.
+export const PRIVACY_ENTITY  = process.env.PRIVACY_ENTITY  || 'Este serviço';
+export const PRIVACY_CONTACT = process.env.PRIVACY_CONTACT || null;
+
 // Path to openclaw's entry.js — invoking via `node entry.js` is more reliable
 // than the bin wrapper (avoids env-detection quirks in containers and lets us
 // load openclaw/plugin-sdk/device-bootstrap via createRequire from the same path).
