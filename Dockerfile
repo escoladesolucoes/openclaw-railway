@@ -25,11 +25,15 @@ RUN npm install --omit=dev
 FROM node:22-bookworm-slim
 
 # OpenClaw version — set via Railway build args to pin a specific version.
-# Default is 2026.5.2: this is the version verified working with the
-# device-bootstrap SDK approach. Earlier 2026.3.12+ releases shipped two
-# bugs (issues #45504 + #51779) that caused CLI `devices approve` to fail
-# with WS handshake race + missing operator.admin scope.
-ARG OPENCLAW_VERSION=2026.5.2
+# Default is 2026.6.6 (latest stable): the template's CLI flags, provider
+# auth-choices, OAuth device-code flows, and the in-process device-bootstrap
+# SDK are all verified against this release. Notable from earlier pins:
+#   - 2026.3.12+ shipped two pairing bugs (issues #45504 + #51779) the wrapper
+#     works around via the device-bootstrap SDK (callerScopes: operator.admin).
+#   - 2026.6.x renamed the OpenAI OAuth choice openai-codex-device-code ->
+#     openai-device-code, and bumped the Node engine floor to >=22.19.0
+#     (satisfied by node:22-bookworm-slim below).
+ARG OPENCLAW_VERSION=2026.6.6
 
 # Runtime deps:
 # - bash: required by node-pty for the shell

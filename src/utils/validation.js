@@ -17,10 +17,13 @@ export function validateSetupForm(body) {
     'anthropic', 'openai', 'google', 'deepseek', 'xai', 'mistral',
     // Multi-model gateways
     'openrouter', 'together', 'litellm', 'aigateway', 'synthetic', 'cloudflare',
+    'fireworks', 'deepinfra', 'novita', 'gmi',
     // Specialized / other
     'groq', 'huggingface', 'venice', 'chutes', 'kilocode', 'opencode',
+    'cerebras', 'nvidia', 'arcee', 'ollamacloud',
     // Asia / regional
-    'moonshot', 'zai', 'minimax', 'modelstudio', 'volcengine', 'qianfan', 'xiaomi', 'byteplus',
+    'moonshot', 'zai', 'minimax', 'modelstudio', 'kimi', 'tokenhub',
+    'volcengine', 'qianfan', 'xiaomi', 'byteplus',
     // Self-hosted / local
     'ollama', 'vllm', 'sglang', 'custom',
   ];
@@ -32,9 +35,11 @@ export function validateSetupForm(body) {
   }
 
   // ── Auth mode (apiKey | oauth) ────────────────────────────────
-  // Only OpenAI currently supports an OAuth flow ("Sign in with ChatGPT").
+  // OAuth here means a *device-code* flow (URL + short code, no browser
+  // callback) — the only kind that works on a headless Railway container.
+  // Keep this list in sync with OAUTH_AUTH_CHOICE in onboardBuilder.js.
   data.authMode = oneOf(body.authMode, ['apiKey', 'oauth'], 'apiKey');
-  const OAUTH_SUPPORTED_PROVIDERS = ['openai'];
+  const OAUTH_SUPPORTED_PROVIDERS = ['openai', 'xai'];
   if (data.authMode === 'oauth' && !OAUTH_SUPPORTED_PROVIDERS.includes(data.provider)) {
     errors.push(`OAuth login is not available for ${data.provider}.`);
   }
@@ -76,7 +81,8 @@ export function validateSetupForm(body) {
   }
 
   // ── Custom compatibility ──────────────────────────────────────
-  data.customCompatibility = oneOf(body.customCompatibility, ['openai', 'anthropic', ''], '');
+  // 'openai-responses' (OpenAI Responses API) added as a valid mode in 2026.6.x.
+  data.customCompatibility = oneOf(body.customCompatibility, ['openai', 'openai-responses', 'anthropic', ''], '');
 
   // ── Model selection ───────────────────────────────────────────
   data.model = (body.model || '').trim() || undefined;
