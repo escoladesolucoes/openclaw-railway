@@ -33,6 +33,29 @@ export function verifySignature(rawBody, signatureHeader) {
 }
 
 /**
+ * Parse + verify a Meta `signed_request` (used by the deauthorize and data
+ * deletion callbacks). Format is `<base64url(sig)>.<base64url(payload)>` where
+ * sig = HMAC-SHA256(payload, appSecret). Returns the decoded payload object,
+ * or null if missing/invalid.
+ */
+export function parseSignedRequest(signedRequest) {
+  if (!signedRequest || !IG_APP_SECRET) return null;
+  const [encodedSig, payload] = String(signedRequest).split('.');
+  if (!encodedSig || !payload) return null;
+
+  const b64url = (s) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  const sig = b64url(encodedSig);
+  const expected = crypto.createHmac('sha256', IG_APP_SECRET).update(payload).digest();
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(sig, expected)) return null;
+
+  try {
+    return JSON.parse(b64url(payload).toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Send a text reply to an Instagram user (IGSID) via the Graph API.
  * Throws on non-2xx so the caller can log Meta's error payload.
  */

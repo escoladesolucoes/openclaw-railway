@@ -18,7 +18,7 @@ import {
   IG_VERIFY_TOKEN, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_AGENT, IG_GRAPH_VERSION,
 } from '../config/index.js';
 import {
-  verifySignature, sendInstagramMessage, instagramBridgeConfigured,
+  verifySignature, parseSignedRequest, sendInstagramMessage, instagramBridgeConfigured,
 } from '../services/instagram.js';
 import { runAgentTurn } from '../services/agentRunner.js';
 import { gatewayManager } from '../services/gatewayManager.js';
@@ -56,6 +56,53 @@ instagramRoutes.get('/instagram/health', (req, res) => {
     },
     gatewayRunning: gatewayManager.isRunning(),
   });
+});
+
+// ── Instagram Business Login callbacks ─────────────────────────────
+// Required URLs for the "Set up Instagram business login" dashboard step.
+// For an own-account bot (no client onboarding, App Review skipped) these just
+// need to exist and return valid responses.
+
+// OAuth redirect — where Meta sends the user after Instagram business login.
+instagramRoutes.get('/instagram/oauth', (req, res) => {
+  const { code, error, error_description } = req.query;
+  if (error) {
+    log.warn(`[instagram] oauth error: ${error} — ${error_description || ''}`);
+    return res.status(400).send(`Instagram login error: ${error}`);
+  }
+  if (code) {
+    // Token is provisioned out-of-band via IG_ACCESS_TOKEN; we just log receipt.
+    // (Full code→token exchange can be added here if/when token auto-refresh is wanted.)
+    log.info(`[instagram] oauth authorization code received (len=${String(code).length})`);
+    return res.status(200).send('✅ Instagram autorizado. Pode fechar esta janela.');
+  }
+  res.status(200).send('Instagram OAuth redirect endpoint.');
+});
+
+// Deauthorize callback — Meta POSTs a signed_request when a user removes the app.
+instagramRoutes.post('/instagram/deauthorize', (req, res) => {
+  const data = parseSignedRequest(req.body?.signed_request);
+  log.info(`[instagram] deauthorize callback for user ${data?.user_id ?? 'unknown'}`);
+  res.sendStatus(200);
+});
+
+// Data deletion request — Meta requires a JSON { url, confirmation_code } reply.
+// (Bridge keeps no PII of its own; eventually this should also purge the user's
+// openclaw session memory keyed by instagram-<user_id>.)
+instagramRoutes.post('/instagram/data-deletion', (req, res) => {
+  const data = parseSignedRequest(req.body?.signed_request);
+  const userId = data?.user_id ?? 'unknown';
+  const code = `del_${userId}`;
+  log.info(`[instagram] data deletion requested for user ${userId}`);
+  res.json({
+    url: `https://${req.get('host')}/webhooks/instagram/data-deletion/status?code=${encodeURIComponent(code)}`,
+    confirmation_code: code,
+  });
+});
+
+// Human-readable status page referenced by the data-deletion response.
+instagramRoutes.get('/instagram/data-deletion/status', (req, res) => {
+  res.status(200).send(`Data deletion request ${req.query.code || ''} received and processed.`);
 });
 
 // ── POST /webhooks/instagram — inbound events ──────────────────────
