@@ -1,4 +1,5 @@
 node_modules/
+.DS_Store
 REFERENCE_ONLY/
 src_ref2
 OVERVIEW.md

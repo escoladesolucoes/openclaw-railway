@@ -39,6 +39,17 @@ export const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || null
 // Set OLLAMA_BASE_URL in Railway env vars (e.g. http://ollama.railway.internal:11434).
 export const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || null;
 
+// ─── Instagram (Meta) Direct-message bridge ─────────────────────────
+// Instagram is NOT a native OpenClaw channel, so we bridge it via Meta's
+// Graph API + webhooks. All values come from Railway env vars.
+// See src/routes/instagram.js and src/services/instagram.js.
+export const IG_VERIFY_TOKEN  = process.env.IG_VERIFY_TOKEN  || null; // webhook handshake token (you choose this string)
+export const IG_APP_SECRET    = process.env.IG_APP_SECRET    || null; // Meta app secret — validates webhook signatures
+export const IG_ACCESS_TOKEN  = process.env.IG_ACCESS_TOKEN  || null; // Instagram user access token — sends replies
+export const IG_AGENT         = process.env.IG_AGENT         || null; // optional: route to a specific openclaw agent id
+export const IG_GRAPH_HOST    = process.env.IG_GRAPH_HOST    || 'graph.instagram.com';
+export const IG_GRAPH_VERSION = process.env.IG_GRAPH_VERSION || 'v21.0';
+
 // Path to openclaw's entry.js — invoking via `node entry.js` is more reliable
 // than the bin wrapper (avoids env-detection quirks in containers and lets us
 // load openclaw/plugin-sdk/device-bootstrap via createRequire from the same path).

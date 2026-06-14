@@ -22,6 +22,7 @@ import { pairingService, probeDeviceBootstrapSdk } from './services/pairingServi
 import { attachTerminalWebSocket, terminalWss } from './services/terminalService.js';
 import { setupRoutes } from './routes/setup.js';
 import { apiRoutes } from './routes/api.js';
+import { instagramRoutes } from './routes/instagram.js';
 import { proxyMiddleware } from './middleware/proxy.js';
 import { requestLogger } from './middleware/logger.js';
 import { requireAdminAuth, setAuthCookie, clearAuthCookie } from './middleware/auth.js';
@@ -55,7 +56,12 @@ async function main() {
   const httpServer = createServer(app);
 
   // ── Middleware ─────────────────────────────────────────────────
-  app.use(express.json({ limit: '2mb' }));
+  // Capture the raw JSON body so the Instagram webhook can verify Meta's
+  // X-Hub-Signature-256 HMAC against the exact bytes Meta signed.
+  app.use(express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => { req.rawBody = buf; },
+  }));
   app.use(express.urlencoded({ extended: true }));
   app.use(requestLogger);
 
@@ -67,6 +73,10 @@ async function main() {
 
   // Setup flow routes
   app.use('/setup', setupRoutes);
+
+  // Meta webhook bridge (Instagram Direct) — must be before the catch-all
+  // proxy so /webhooks/* is handled by us, not forwarded to the gateway.
+  app.use('/webhooks', instagramRoutes);
 
   /**
    * SSE: real-time pairing pending updates
