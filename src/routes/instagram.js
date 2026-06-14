@@ -22,6 +22,7 @@ import {
 } from '../services/instagram.js';
 import { runAgentTurn } from '../services/agentRunner.js';
 import { isBotEnabled, enableBot, disableBot, listBotStates } from '../services/instagramHandoff.js';
+import { recordActivity, listActivity } from '../services/instagramActivity.js';
 import { runOpenclaw } from '../services/onboardBuilder.js';
 import { gatewayManager } from '../services/gatewayManager.js';
 import { log } from '../utils/log.js';
@@ -151,6 +152,12 @@ instagramRoutes.get('/instagram/handoff', async (req, res) => {
   res.json({ defaultBot: IG_DEFAULT_BOT, overrides: await listBotStates() });
 });
 
+// TEMP diagnostic — recent inbound webhook activity (gated by IG_VERIFY_TOKEN).
+instagramRoutes.get('/instagram/activity', (req, res) => {
+  if (!IG_VERIFY_TOKEN || req.query.token !== IG_VERIFY_TOKEN) return res.sendStatus(403);
+  res.json({ activity: listActivity() });
+});
+
 instagramRoutes.post('/instagram/handoff', async (req, res) => {
   if (!IG_VERIFY_TOKEN || req.query.token !== IG_VERIFY_TOKEN) return res.sendStatus(403);
   const { action, user } = req.body || {};
@@ -164,7 +171,9 @@ instagramRoutes.post('/instagram/handoff', async (req, res) => {
 // ── POST /webhooks/instagram — inbound events ──────────────────────
 instagramRoutes.post('/instagram', (req, res) => {
   const signature = req.get('x-hub-signature-256');
-  if (!verifySignature(req.rawBody, signature)) {
+  const sigOk = verifySignature(req.rawBody, signature);
+  recordActivity({ stage: 'post', object: req.body?.object, sigOk, hasSig: Boolean(signature), hasRawBody: Boolean(req.rawBody) });
+  if (!sigOk) {
     log.warn('[instagram] rejected event — invalid/missing signature');
     return res.sendStatus(401);
   }
@@ -172,20 +181,26 @@ instagramRoutes.post('/instagram', (req, res) => {
   // Ack within Meta's short window, then process asynchronously so a slow
   // agent turn never causes Meta to retry or disable the webhook.
   res.sendStatus(200);
-  handleWebhook(req.body).catch((err) =>
-    log.error('[instagram] webhook handler error:', err.message)
-  );
+  handleWebhook(req.body).catch((err) => {
+    recordActivity({ stage: 'handler_error', error: err.message });
+    log.error('[instagram] webhook handler error:', err.message);
+  });
 });
 
 // ── Event processing ───────────────────────────────────────────────
 async function handleWebhook(body) {
-  if (!body || body.object !== 'instagram') return;
+  if (!body || body.object !== 'instagram') {
+    recordActivity({ stage: 'ignored', object: body?.object });
+    return;
+  }
 
   for (const entry of body.entry || []) {
     const events = entry.messaging || entry.standby || [];
+    recordActivity({ stage: 'entry', entryKeys: Object.keys(entry), eventsCount: events.length });
     for (const ev of events) {
       const senderId = ev.sender?.id;
       const message = ev.message;
+      recordActivity({ stage: 'event', senderId, hasMessage: Boolean(message), isEcho: Boolean(message?.is_echo), evKeys: Object.keys(ev), text: (message?.text || '').slice(0, 80) });
       if (!senderId || !message) continue;
       if (message.is_echo) continue;          // ignore our own outbound echoes (prevents loops)
       const text = (message.text || '').trim();
@@ -243,8 +258,10 @@ async function replyTo(senderId, text) {
 async function trySend(senderId, text) {
   try {
     await sendInstagramMessage(senderId, text);
+    recordActivity({ stage: 'sent', senderId, text: text.slice(0, 60) });
     log.info(`[instagram] ▶ ${senderId}: ${text.slice(0, 120)}`);
   } catch (err) {
+    recordActivity({ stage: 'send_error', senderId, error: err.message });
     log.error(`[instagram] failed to send to ${senderId}: ${err.message}`);
   }
 }
