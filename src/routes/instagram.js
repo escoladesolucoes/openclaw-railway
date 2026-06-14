@@ -105,6 +105,27 @@ instagramRoutes.get('/instagram/data-deletion/status', (req, res) => {
   res.status(200).send(`Data deletion request ${req.query.code || ''} received and processed.`);
 });
 
+// ── TEMP diagnostic — confirm the agent-invocation link ────────────
+// Runs ONE agent turn through the exact same path the bridge uses and returns
+// both the parsed reply and the raw `openclaw agent --json` output, so we can
+// confirm the JSON shape matches the parser. Gated by IG_VERIFY_TOKEN.
+// Remove once the bridge is verified end-to-end.
+instagramRoutes.get('/instagram/debug-agent', async (req, res) => {
+  if (!IG_VERIFY_TOKEN || req.query.token !== IG_VERIFY_TOKEN) {
+    return res.sendStatus(403);
+  }
+  if (!gatewayManager.isRunning()) {
+    return res.status(503).json({ error: 'gateway not running' });
+  }
+  const msg = (req.query.msg || 'oi, teste de diagnóstico').toString();
+  try {
+    const { reply, code, raw } = await runAgentTurn(msg, 'debug-instagram');
+    res.json({ parsedReply: reply, exitCode: code, rawOutput: raw });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /webhooks/instagram — inbound events ──────────────────────
 instagramRoutes.post('/instagram', (req, res) => {
   const signature = req.get('x-hub-signature-256');
