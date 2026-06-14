@@ -21,6 +21,7 @@ import {
   verifySignature, parseSignedRequest, sendInstagramMessage, instagramBridgeConfigured,
 } from '../services/instagram.js';
 import { runAgentTurn } from '../services/agentRunner.js';
+import { runOpenclaw } from '../services/onboardBuilder.js';
 import { gatewayManager } from '../services/gatewayManager.js';
 import { log } from '../utils/log.js';
 
@@ -113,6 +114,13 @@ instagramRoutes.get('/instagram/data-deletion/status', (req, res) => {
 instagramRoutes.get('/instagram/debug-agent', async (req, res) => {
   if (!IG_VERIFY_TOKEN || req.query.token !== IG_VERIFY_TOKEN) {
     return res.sendStatus(403);
+  }
+  // help=1 → dump `openclaw agent --help` + version so we can discover the
+  // real CLI flags for this installed version (they drift from the docs).
+  if (req.query.help) {
+    const help = await runOpenclaw(['agent', '--help'], 20_000);
+    const version = await runOpenclaw(['--version'], 10_000);
+    return res.json({ version: version.output, agentHelp: help.output });
   }
   if (!gatewayManager.isRunning()) {
     return res.status(503).json({ error: 'gateway not running' });
