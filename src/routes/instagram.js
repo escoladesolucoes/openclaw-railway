@@ -15,7 +15,7 @@
 
 import { Router } from 'express';
 import {
-  IG_VERIFY_TOKEN, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_AGENT, IG_GRAPH_VERSION, IG_DEFAULT_BOT,
+  IG_VERIFY_TOKEN, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_AGENT, IG_GRAPH_VERSION, IG_DEFAULT_BOT, AGENT_BACKEND,
 } from '../config/index.js';
 import {
   verifySignature, parseSignedRequest, sendInstagramMessage, notifyHandoff, instagramBridgeConfigured,
@@ -36,6 +36,11 @@ const ENABLE_COMMANDS = new Set(['/bot', '/ia', '/assistente']);
 const DISABLE_COMMANDS = new Set(['/humano', '/atendente', 'falar com humano', 'falar com atendente']);
 const BOT_ON_MSG = '🤖 Assistente ativado! Pode mandar sua pergunta. (pra falar com um humano, é só mandar /humano)';
 const BOT_OFF_MSG = '👋 Ok! Um atendente humano vai te responder por aqui. (pra reativar o assistente automático, mande /bot)';
+
+// Whether the agent backend is reachable enough to attempt a turn. The local
+// OpenClaw gateway must be running; the remote Hermes backend is reached
+// per-call (its own client handles errors), so we never gate messages on a poll.
+const agentBackendReady = () => (AGENT_BACKEND === 'hermes' ? true : gatewayManager.isRunning());
 
 // ── GET /webhooks/instagram — Meta verification handshake ──────────
 // Meta calls this once when you save the webhook: it sends hub.mode=subscribe,
@@ -65,6 +70,8 @@ instagramRoutes.get('/instagram/health', (req, res) => {
       IG_AGENT: IG_AGENT || null,
       IG_GRAPH_VERSION,
     },
+    backend: AGENT_BACKEND,
+    backendReady: agentBackendReady(),
     gatewayRunning: gatewayManager.isRunning(),
   });
 });
@@ -132,8 +139,8 @@ instagramRoutes.get('/instagram/debug-agent', async (req, res) => {
     const version = await runOpenclaw(['--version'], 10_000);
     return res.json({ version: version.output, agentHelp: help.output });
   }
-  if (!gatewayManager.isRunning()) {
-    return res.status(503).json({ error: 'gateway not running' });
+  if (!agentBackendReady()) {
+    return res.status(503).json({ error: `agent backend not ready (${AGENT_BACKEND})` });
   }
   const msg = (req.query.msg || 'oi, teste de diagnóstico').toString();
   try {
@@ -242,8 +249,8 @@ async function replyTo(senderId, text) {
   }
 
   // ── Bot is on for this user → normal agent flow ──
-  if (!gatewayManager.isRunning()) {
-    log.warn(`[instagram] gateway not running — dropping message from ${senderId}`);
+  if (!agentBackendReady()) {
+    log.warn(`[instagram] agent backend not ready (${AGENT_BACKEND}) — dropping message from ${senderId}`);
     return;
   }
 

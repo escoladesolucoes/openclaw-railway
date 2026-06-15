@@ -62,6 +62,26 @@ export const IG_DEFAULT_BOT = process.env.IG_DEFAULT_BOT || 'off';
 export const PRIVACY_ENTITY  = process.env.PRIVACY_ENTITY  || 'Este serviço';
 export const PRIVACY_CONTACT = process.env.PRIVACY_CONTACT || null;
 
+// ─── Agent backend selection ────────────────────────────────────────
+// Which engine answers bridged channels (Instagram, etc.):
+//   'openclaw' (default) → local OpenClaw gateway via `openclaw agent` CLI
+//   'hermes'             → remote Hermes HTTP api_server (OpenAI-compatible)
+// Set AGENT_BACKEND=hermes on a dedicated bridge service to make a per-company
+// Hermes the official responder without running OpenClaw here.
+export const AGENT_BACKEND = (process.env.AGENT_BACKEND || 'openclaw').toLowerCase();
+
+// BRIDGE_ONLY=true → run ONLY the Express bridge (webhooks + legal pages),
+// never boot/launch the local OpenClaw gateway. Used by the dedicated
+// Instagram→Hermes bridge service (reuses this repo, no OpenClaw runtime).
+export const BRIDGE_ONLY = /^(1|true|yes|on)$/i.test(process.env.BRIDGE_ONLY || '');
+
+// Hermes HTTP api_server (used when AGENT_BACKEND=hermes). The api_server is
+// OpenAI-compatible: POST /v1/chat/completions with a Bearer key; per-user
+// memory rides on the X-Hermes-Session-Id header (stable id = persistent scope).
+export const HERMES_API_URL = process.env.HERMES_API_URL || null; // e.g. http://hermes-agent.railway.internal:8643
+export const HERMES_API_KEY = process.env.HERMES_API_KEY || null; // = Hermes service's API_SERVER_KEY
+export const HERMES_MODEL   = process.env.HERMES_MODEL   || 'hermes-agent';
+
 // Path to openclaw's entry.js — invoking via `node entry.js` is more reliable
 // than the bin wrapper (avoids env-detection quirks in containers and lets us
 // load openclaw/plugin-sdk/device-bootstrap via createRequire from the same path).

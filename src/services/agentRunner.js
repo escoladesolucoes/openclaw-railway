@@ -4,18 +4,21 @@
  * Channel-agnostic helper to run a single OpenClaw agent turn and return the
  * reply text. Used by inbound webhook bridges (e.g. Instagram, WhatsApp Cloud
  * API) that aren't native OpenClaw channels: we receive a message over HTTP,
- * ask the agent for a reply via the `openclaw agent` CLI (which routes through
- * the running gateway), then deliver the reply ourselves.
+ * ask the agent for a reply, then deliver the reply ourselves.
  *
- *   openclaw agent --message "<text>" --session-id "<id>" --json
+ * Two backends, selected by AGENT_BACKEND:
+ *   'openclaw' (default) → `openclaw agent --message … --session-id … --json`
+ *                          (routes through the local gateway)
+ *   'hermes'             → remote Hermes HTTP api_server (see hermesAgent.js)
  *
- * The stable --session-id keeps per-user conversation memory across calls.
- * We do NOT pass --deliver: the agent only computes the reply; the caller
- * delivers it back over the originating channel's own API.
+ * The stable --session-id / session key keeps per-user conversation memory
+ * across calls. We do NOT deliver from here; the caller sends the reply back
+ * over the originating channel's own API.
  */
 
 import { runOpenclaw } from './onboardBuilder.js';
-import { IG_AGENT } from '../config/index.js';
+import { IG_AGENT, AGENT_BACKEND } from '../config/index.js';
+import { runHermesTurn } from './hermesAgent.js';
 import { log } from '../utils/log.js';
 
 // Agent turns can take a while (model latency). We already 200-acked the
@@ -27,6 +30,11 @@ const AGENT_TIMEOUT_MS = 180_000;
  * @returns {Promise<{reply: string|null, code: number, raw: string}>}
  */
 export async function runAgentTurn(text, sessionKey, { agent = IG_AGENT } = {}) {
+  // Remote Hermes backend: hand off to the HTTP api_server client.
+  if (AGENT_BACKEND === 'hermes') {
+    return runHermesTurn(text, sessionKey);
+  }
+
   const args = ['agent', '--message', text, '--session-id', sessionKey, '--json'];
   if (agent) args.push('--agent', agent);
 

@@ -16,7 +16,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 
-import { config, OPENCLAW_ENTRY, OPENCLAW_NODE } from './config/index.js';
+import { config, OPENCLAW_ENTRY, OPENCLAW_NODE, BRIDGE_ONLY, AGENT_BACKEND } from './config/index.js';
 import { gatewayManager } from './services/gatewayManager.js';
 import { pairingService, probeDeviceBootstrapSdk } from './services/pairingService.js';
 import { attachTerminalWebSocket, terminalWss } from './services/terminalService.js';
@@ -34,21 +34,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   // ── Startup sanity checks ──────────────────────────────────────
-  // Verify openclaw entry.js is reachable. We invoke it directly via node
-  // (not the bin wrapper) everywhere, so this is what actually matters.
-  try {
-    execFileSync(OPENCLAW_NODE, [OPENCLAW_ENTRY, '--version'], { stdio: 'ignore' });
-  } catch {
-    log.error('❌ openclaw entry.js not found or failed to run.');
-    log.error(`   OPENCLAW_NODE  = ${OPENCLAW_NODE}`);
-    log.error(`   OPENCLAW_ENTRY = ${OPENCLAW_ENTRY}`);
-    log.error('   Check Dockerfile installs openclaw globally and the path is correct.');
-    process.exit(1);
-  }
+  // Bridge-only deployments (e.g. the Instagram→Hermes bridge) never run a
+  // local OpenClaw gateway, so skip the OpenClaw entry/SDK checks entirely.
+  if (BRIDGE_ONLY) {
+    log.info(`🌉 BRIDGE_ONLY mode — OpenClaw runtime disabled; agent backend = ${AGENT_BACKEND}`);
+  } else {
+    // Verify openclaw entry.js is reachable. We invoke it directly via node
+    // (not the bin wrapper) everywhere, so this is what actually matters.
+    try {
+      execFileSync(OPENCLAW_NODE, [OPENCLAW_ENTRY, '--version'], { stdio: 'ignore' });
+    } catch {
+      log.error('❌ openclaw entry.js not found or failed to run.');
+      log.error(`   OPENCLAW_NODE  = ${OPENCLAW_NODE}`);
+      log.error(`   OPENCLAW_ENTRY = ${OPENCLAW_ENTRY}`);
+      log.error('   Check Dockerfile installs openclaw globally and the path is correct.');
+      process.exit(1);
+    }
 
-  // Probe the in-process device-bootstrap SDK so we know on boot whether
-  // openclaw's dist layout is intact (we use it for device list/approve).
-  void probeDeviceBootstrapSdk();
+    // Probe the in-process device-bootstrap SDK so we know on boot whether
+    // openclaw's dist layout is intact (we use it for device list/approve).
+    void probeDeviceBootstrapSdk();
+  }
 
   // 1. Ensure all required directories exist on the volume
   await ensureDataDir();
@@ -113,8 +119,14 @@ async function main() {
   });
 
   // Root routing — when gateway is running, proxy openclaw UI at /.
-  // When not configured, redirect to /setup.
+  // When not configured, redirect to /setup. In bridge-only mode there is no
+  // gateway/UI, so show a tiny status landing instead.
   app.get('/', (req, res, next) => {
+    if (BRIDGE_ONLY) {
+      return res.status(200).type('text/plain').send(
+        `Instagram → Hermes bridge online (backend=${AGENT_BACKEND}).\n`
+        + 'Endpoints: /webhooks/instagram (Meta webhook), /webhooks/instagram/health, /privacy, /terms');
+    }
     if (gatewayManager.isRunning()) return next(); // fall through to proxy below
     res.redirect('/setup');
   });
@@ -177,10 +189,15 @@ ${req.query.err ? '<p class="err">Incorrect password</p>' : ''}
     res.sendFile(path.join(__dirname, '../public/admin.html'));
   });
 
-  // ── Catch-all proxy — MUST be last ────────────────────────────
+  // ── Catch-all — MUST be last ──────────────────────────────────
   // All our own routes (/api, /setup, /admin, /login, /logout, /ws)
-  // are registered above. Everything else proxies to openclaw gateway.
-  app.use('/', proxyMiddleware);
+  // are registered above. With OpenClaw, everything else proxies to the
+  // gateway; in bridge-only mode there is no gateway, so 404 instead.
+  if (BRIDGE_ONLY) {
+    app.use('/', (req, res) => res.status(404).type('text/plain').send('Not found (bridge-only).'));
+  } else {
+    app.use('/', proxyMiddleware);
+  }
 
   // ── WebSocket services ─────────────────────────────────────────
   // Initialize terminal WSS (registers connection handler, but NOT
@@ -211,7 +228,10 @@ ${req.query.err ? '<p class="err">Incorrect password</p>' : ''}
   });
 
   // ── Auto-launch if already configured ─────────────────────────
-  if (await config.isAlreadyConfigured()) {
+  // Skipped entirely in bridge-only mode (no local OpenClaw gateway).
+  if (BRIDGE_ONLY) {
+    log.info('🌉 BRIDGE_ONLY — not launching OpenClaw gateway. Bridge endpoints are live.');
+  } else if (await config.isAlreadyConfigured()) {
     log.info('Existing config found — launching OpenClaw gateway automatically...');
     try {
       await gatewayManager.start();
