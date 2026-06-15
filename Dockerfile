@@ -25,11 +25,15 @@ RUN npm install --omit=dev
 FROM node:22-bookworm-slim
 
 # OpenClaw version — set via Railway build args to pin a specific version.
-# Default is 2026.5.2: this is the version verified working with the
-# device-bootstrap SDK approach. Earlier 2026.3.12+ releases shipped two
-# bugs (issues #45504 + #51779) that caused CLI `devices approve` to fail
-# with WS handshake race + missing operator.admin scope.
-ARG OPENCLAW_VERSION=2026.5.2
+# Default is 2026.6.6 (latest stable): the template's CLI flags, provider
+# auth-choices, OAuth device-code flows, and the in-process device-bootstrap
+# SDK are all verified against this release. Notable from earlier pins:
+#   - 2026.3.12+ shipped two pairing bugs (issues #45504 + #51779) the wrapper
+#     works around via the device-bootstrap SDK (callerScopes: operator.admin).
+#   - 2026.6.x renamed the OpenAI OAuth choice openai-codex-device-code ->
+#     openai-device-code, and bumped the Node engine floor to >=22.19.0
+#     (satisfied by node:22-bookworm-slim below).
+ARG OPENCLAW_VERSION=2026.6.6
 
 # Runtime deps:
 # - bash: required by node-pty for the shell
@@ -44,9 +48,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install openclaw globally — needs git for transitive deps with GitHub URLs
+# Install openclaw globally — needs git for transitive deps with GitHub URLs.
+#
+# Compatibility floor: MIN below is a HARD-CODED constant (deliberately NOT an
+# ARG), so no Railway variable can lower or bypass it. If the deployer's
+# OPENCLAW_VERSION is a concrete release older than MIN, we install MIN instead;
+# tags ("latest") and pre-releases are installed verbatim. The decision is
+# recorded in /app/openclaw-build-info.json so the setup/admin UI can explain
+# an auto-bump. Keep MIN in sync with MIN_VERSION in src/utils/version.js
+# (and the ARG OPENCLAW_VERSION default above).
 RUN printf '[url "https://github.com/"]\n\tinsteadOf = ssh://git@github.com/\n\tinsteadOf = git@github.com:\n' > /root/.gitconfig \
-    && npm install -g openclaw@${OPENCLAW_VERSION}
+    && MIN="2026.6.6" \
+    && REQ="${OPENCLAW_VERSION:-$MIN}" && EFF="$REQ" && BUMPED=false \
+    && if echo "$REQ" | grep -Eq '^[0-9]{4}\.[0-9]+\.[0-9]+$' && dpkg --compare-versions "$REQ" lt "$MIN"; then \
+         echo "WARNING: OPENCLAW_VERSION=$REQ is below the compatibility floor $MIN — installing $MIN instead"; \
+         EFF="$MIN"; BUMPED=true; \
+       fi \
+    && npm install -g openclaw@"$EFF" \
+    && mkdir -p /app \
+    && printf '{"requested":"%s","effective":"%s","min":"%s","bumped":%s}\n' "$REQ" "$EFF" "$MIN" "$BUMPED" > /app/openclaw-build-info.json \
+    && echo "openclaw build-info: $(cat /app/openclaw-build-info.json)"
 
 WORKDIR /app
 
